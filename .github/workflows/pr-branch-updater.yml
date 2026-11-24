@@ -9,11 +9,24 @@
 #         APP_CLIENT_ID: ${{ secrets.PR_UPDATER_APP_CLIENT_ID }}
 #         APP_PRIVATE_KEY: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY }}
 #
+# Or, to read the app secrets from a deployment environment:
+#
+#   jobs:
+#     update:
+#       uses: kyverno/.github/.github/workflows/pr-branch-updater.yml@main
+#       with:
+#         environment: pr-updater-app
+#
 # Inputs:
 #   base_branch — only update PRs targeting this branch.
 #                 Defaults to the repository's default branch.
+#   environment — run the job in this deployment environment of the caller
+#                 repository. A caller job can't set an environment itself, and
+#                 environment secrets can't be passed with `secrets:`, so the
+#                 job reads PR_UPDATER_APP_CLIENT_ID and
+#                 PR_UPDATER_APP_PRIVATE_KEY from the environment directly.
 #
-# Required secrets:
+# Secrets (required unless environment is set):
 #   APP_CLIENT_ID — GitHub App client ID used to mint an installation token.
 #   APP_PRIVATE_KEY — GitHub App private key paired with APP_CLIENT_ID.
 #
@@ -36,15 +49,37 @@ on:
         required: false
         type: string
         default: ""
+      environment:
+        description: >-
+          Deployment environment of the caller repository that holds
+          PR_UPDATER_APP_CLIENT_ID and PR_UPDATER_APP_PRIVATE_KEY.
+          Leave empty to use the APP_CLIENT_ID and APP_PRIVATE_KEY secrets.
+        required: false
+        type: string
+        default: ""
     secrets:
       APP_CLIENT_ID:
         description: >-
           GitHub App client ID used to mint a short-lived installation token.
-        required: true
+          Required unless the environment input is set.
+        required: false
       APP_PRIVATE_KEY:
         description: >-
           GitHub App private key paired with APP_CLIENT_ID.
-        required: true
+          Required unless the environment input is set.
+        required: false
+      # Declared so that the job can read them from the environment input:
+      # when a job in a reusable workflow sets an environment, a secret of
+      # that environment overrides the secret of the same name. Callers
+      # don't pass these.
+      PR_UPDATER_APP_CLIENT_ID:
+        description: >-
+          Read from the environment input. Callers don't pass it.
+        required: false
+      PR_UPDATER_APP_PRIVATE_KEY:
+        description: >-
+          Read from the environment input. Callers don't pass it.
+        required: false
 
 permissions: {}
 
@@ -52,6 +87,7 @@ jobs:
   update-pr-branches:
     name: Update out-of-date PR branches
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     permissions:
       contents: write
       pull-requests: write
@@ -72,7 +108,7 @@ jobs:
         id: normalize-key
         shell: bash
         env:
-          RAW_APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          RAW_APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY || secrets.PR_UPDATER_APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail
 
@@ -107,7 +143,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          client-id: ${{ secrets.APP_CLIENT_ID }}
+          client-id: ${{ secrets.APP_CLIENT_ID || secrets.PR_UPDATER_APP_CLIENT_ID }}
           private-key: ${{ steps.normalize-key.outputs.private_key }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
